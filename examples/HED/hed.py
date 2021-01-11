@@ -15,6 +15,8 @@ from tensorpack.tfutils import gradproc, optimizer
 from tensorpack.tfutils.summary import add_moving_summary, add_param_summary
 from tensorpack.utils.gpu import get_num_gpu
 from tensorpack.utils import logger
+import time
+import os
 
 
 def class_balanced_sigmoid_cross_entropy(logits, label, name='cross_entropy_loss'):
@@ -267,28 +269,50 @@ def get_config():
     )
 
 
-def run(model_path, image_path, output):
+def process_one_image(predictor, image_path, output=None):
+    im = cv2.imread(image_path)
+    fname = image_path.split('/')[-1]
+
+    assert im is not None
+    im = cv2.resize(
+        im, (im.shape[1] // 16 * 16, im.shape[0] // 16 * 16)
+    )[None, :, :, :].astype('float32')
+    
+    outputs = predictor(im)
+    
+    if output is None:
+        pred = outputs[5][0]
+        cv2.imwrite("{}_hed.jpg".format(fname[:-4]), pred * 255)
+    else:
+        pred = outputs[5][0]
+        cv2.imwrite(os.path.join(output, fname), pred * 255)
+
+    
+
+def run(model_path, image_path, output_path):
     pred_config = PredictConfig(
         model=Model(),
         session_init=SmartInit(model_path),
         input_names=['image'],
         output_names=['output' + str(k) for k in range(1, 7)])
     predictor = OfflinePredictor(pred_config)
-    im = cv2.imread(image_path)
-    assert im is not None
-    im = cv2.resize(
-        im, (im.shape[1] // 16 * 16, im.shape[0] // 16 * 16)
-    )[None, :, :, :].astype('float32')
-    outputs = predictor(im)
-    if output is None:
-        for k in range(6):
-            pred = outputs[k][0]
-            cv2.imwrite("out{}.png".format(
-                '-fused' if k == 5 else str(k + 1)), pred * 255)
-        logger.info("Results saved to out*.png")
+
+    if output_path is not None and not os.path.isdir(output_path):
+        os.mkdir(output_path)
+
+    count = 1
+    total = len(os.listdir(image_path))
+    if os.path.isdir(image_path):
+        for img in os.listdir(image_path):
+            if count % 100 == 0:
+                print("{0}/{1} processed.".format(count, total))
+            process_one_image(predictor, os.path.join(image_path, img), output_path)
+            count += 1
     else:
-        pred = outputs[5][0]
-        cv2.imwrite(output, pred * 255)
+        beg = time.time()
+        process_one_image(predictor, image_path, output_path)
+        end = time.time()
+        print("Runtime: {0}".format(end-beg))
 
 
 if __name__ == '__main__':
@@ -297,7 +321,7 @@ if __name__ == '__main__':
     parser.add_argument('--load', help='load model')
     parser.add_argument('--view', help='view dataset', action='store_true')
     parser.add_argument('--run', help='run model on images')
-    parser.add_argument('--output', help='fused output filename. default to out-fused.png')
+    parser.add_argument('--output', help='fused output filename or directory')
     args = parser.parse_args()
     if args.gpu:
         os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
@@ -305,7 +329,9 @@ if __name__ == '__main__':
     if args.view:
         view_data()
     elif args.run:
+        
         run(args.load, args.run, args.output)
+        
     else:
         config = get_config()
         config.session_init = SmartInit(args.load)
