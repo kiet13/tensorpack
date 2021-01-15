@@ -274,19 +274,24 @@ def process_one_image(predictor, image_path, output=None):
     fname = image_path.split('/')[-1]
 
     assert im is not None
+    width = im.shape[1]
+    height = im.shape[0]
     im = cv2.resize(
         im, (im.shape[1] // 16 * 16, im.shape[0] // 16 * 16)
     )[None, :, :, :].astype('float32')
+    
+    
     
     outputs = predictor(im)
     
     if output is None:
         pred = outputs[5][0]
         cv2.imwrite("{}_hed.jpg".format(fname[:-4]), pred * 255)
+        
     else:
         pred = outputs[5][0]
+        pred = cv2.resize(pred, (width, height))[:, :, None]
         cv2.imwrite(os.path.join(output, fname), pred * 255)
-
     
 
 def run(model_path, image_path, output_path):
@@ -301,8 +306,9 @@ def run(model_path, image_path, output_path):
         os.mkdir(output_path)
 
     count = 1
-    total = len(os.listdir(image_path))
+  
     if os.path.isdir(image_path):
+        total = len(os.listdir(image_path))
         for img in os.listdir(image_path):
             if count % 100 == 0:
                 print("{0}/{1} processed.".format(count, total))
